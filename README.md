@@ -1,65 +1,101 @@
-# CLIProxyAPI Raw Responses Plugin
+# CPA Raw Responses Plugin
 
-**A CPA companion plugin/sidecar for transparent OpenAI Responses API routing.**
+**An independent native plugin for [CLIProxyAPI / CPA](https://github.com/router-for-me/CLIProxyAPI).**
 
-This small relay is designed for [CLIProxyAPI (CPA)](https://github.com/router-for-me/CLIProxyAPI) deployments that need the upstream behavior of a native OpenAI Responses endpoint. It preserves the request body, streaming responses, response status, and upstream headers instead of sending the request through CPA's Codex request normalizer.
+It keeps clients on CPA's normal `:8317` endpoint while providing two protections:
 
-The relay applies one provider-specific compatibility mapping: lower-case GPT-5.6 aliases are converted to Paratera's case-sensitive upstream model IDs.
+1. **CPA-managed Paratera GPT-5.6 routing.** Configure Paratera as a CPA `openai-compatibility` provider and map the lower-case aliases to Paratera's case-sensitive model IDs (`GPT-5.6-Terra`, etc.). Its `disabled` setting in CPAMC's **AI Providers** screen is the routing switch.
+2. **A global reasoning guard for every CPA provider and model.** The plugin runs as a CPA request interceptor and repairs only an explicit zero, null, or empty `reasoning.effort` / `reasoning_effort` value. Existing non-zero effort is preserved. It does **not** add reasoning fields to requests that did not declare them, preventing incompatible models from receiving unsupported parameters.
 
-> This is an independent CPA companion project, not an official CLIProxyAPI distribution or upstream plugin binary.
+> This is not an official CLIProxyAPI distribution. It is a CPA native plugin plus an optional legacy sidecar fallback.
 
-## Why
+## CPAMC Frontend
 
-CPA's `codex-api-key` executor intentionally normalizes Responses requests for Codex-compatible upstreams. That is useful for Codex providers, but it can change provider-specific behavior. This sidecar is useful when a CPA deployment must retain the original Responses request semantics for one upstream.
+After installation, CPA automatically lists **Paratera Raw Responses** in:
+
+```text
+http://your-cpa-host:8317/management.html#/plugin-pages/
+```
+
+The plugin page shows routing status, global reasoning-guard status, the default repair effort, upstream base URL, and the registered Paratera model aliases.
 
 ## Features
 
-- OpenAI Responses API forwarding under `/v1/*`.
+- Native CPA `request_interceptor` and `management_api` capabilities, with an optional plugin-owned Raw Responses executor.
+- Normal CPA entrypoint at `http://your-cpa-host:8317/v1`.
+- CPA management UI registration and plugin resource page.
+- CPA request/usage handling remains in the normal gateway path.
+- Responses request body preservation for the selected Paratera model family.
+- The recommended provider uses `proxy-url: direct` and is managed by CPA itself.
+- Case-sensitive Paratera mapping for lower-case `gpt-5.6-luna`, `gpt-5.6-sol`, and `gpt-5.6-terra` aliases.
 - Non-streaming and SSE streaming support.
-- Strict bearer-key authentication on API routes.
-- Direct HTTPS connection to the configured upstream; no ambient proxy use.
-- Case-sensitive model alias mapping for `gpt-5.6-luna`, `gpt-5.6-sol`, and `gpt-5.6-terra`.
-- No request-body or API-key logging.
-- Health endpoint at `/healthz`.
+- No API-key or request-body logging.
 
-## Quick Start
+## Build and Release
 
 ```bash
-cp .env.example .env
-chmod 600 .env
-python3 paratera_raw_relay.py
+make test
+make release
 ```
 
-Set `UPSTREAM_API_KEY` to the upstream provider key. If `CLIENT_API_KEY` is omitted, the relay accepts the same key from clients and forwards it upstream.
-
-Point Codex or another OpenAI Responses client to:
+The release artifact is written to:
 
 ```text
-http://your-host:8320/v1
+dist/paratera-raw-responses-v0.1.0.so
+dist/checksums.txt
 ```
 
-Keep the client model lower-case when using the built-in aliases, for example `gpt-5.6-terra`.
+The target platform is `linux/amd64`, matching a standard x86_64 CPA VPS.
 
-## systemd
+## Install on CPA
 
-The repository includes `paratera-raw-relay.service` as a deployment template. Install the script under `/opt/paratera-raw-relay/`, keep credentials in a root-readable environment file, and enable the service:
+1. Copy `dist/paratera-raw-responses-v0.1.0.so` to:
 
-```bash
-sudo install -d -m 0755 /opt/paratera-raw-relay
-sudo install -m 0755 paratera_raw_relay.py /opt/paratera-raw-relay/
-sudo install -m 0644 paratera-raw-relay.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now paratera-raw-relay.service
-```
+   ```text
+   /opt/cliproxy/plugins/linux/amd64/paratera-raw-responses-v0.1.0.so
+   ```
 
-Use a `root:root` environment file with mode `0600` at `/etc/paratera-raw-relay.env`.
+2. Merge `plugin-config.example.yaml` and the `openai-compatibility` provider below into CPA's `config.yaml`. Keep `raw_responses_routing: false` so the AI Provider toggle remains authoritative.
+
+   ```yaml
+   openai-compatibility:
+     - name: paratera-raw-responses
+       disabled: false
+       priority: 100
+       base-url: https://llmapi.paratera.com/v1
+       api-key-entries:
+         - api-key: <PARATERA_API_KEY>
+           proxy-url: direct
+       models:
+         - { name: GPT-5.6-Luna, alias: gpt-5.6-luna, force-mapping: true }
+         - { name: GPT-5.6-Sol, alias: gpt-5.6-sol, force-mapping: true }
+         - { name: GPT-5.6-Terra, alias: gpt-5.6-terra, force-mapping: true }
+   ```
+
+3. Restart CPA:
+
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl restart cliproxy.service
+   ```
+
+4. Verify the AI Provider toggle in CPAMC, `GET /v1/models`, `POST /v1/responses`, and the CPA usage dashboard.
+
+## Configuration
+
+See `plugin-config.example.yaml` and `cpa-plugin/README.md`.
+
+`reasoning_guard: true` applies to all CPA providers and models. It repairs **declared zero/empty reasoning values** but intentionally leaves requests without a reasoning field unchanged for provider compatibility.
+
+## Optional Legacy Sidecar
+
+`paratera_raw_relay.py` and `paratera-raw-relay.service` are retained only as a fallback for environments that cannot load native CPA plugins. The native plugin is the recommended deployment because it appears in CPAMC and preserves CPA-side visibility.
 
 ## Security
 
-- Use a dedicated upstream key where possible.
-- Restrict the listener with a cloud firewall or bind it to a private network.
-- Prefer HTTPS or an SSH/Tailscale private path when client traffic crosses an untrusted network.
-- Do not commit `.env` or any real API key.
+- CPA's root-owned `config.yaml` contains the provider key; never commit it.
+- Do not commit `.env`, generated release artifacts, or real API keys.
+- Validate the CPA YAML and back up `/opt/cliproxy/config.yaml` before restarting.
 
 ## License
 

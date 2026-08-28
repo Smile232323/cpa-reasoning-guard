@@ -1,0 +1,9 @@
+plugins:
+  enabled: true
+  configs:
+    paratera-raw-responses:
+      enabled: true
+      # Set false when models and credentials are managed by CPA's AI provider UI.
+      raw_responses_routing: false
+      reasoning_guard: true
+      default_reasoning_effort: high
