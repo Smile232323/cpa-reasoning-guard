@@ -1,20 +1,20 @@
 # CPA Native Plugin
 
-This is a native `linux/amd64` CPA plugin. Its recommended mode exposes two capabilities:
+This `linux/amd64` native plugin exposes only two CPA capabilities:
 
-- **Request Interceptor** — runs around every CPA provider/model request and repairs an explicitly zero/empty reasoning setting while preserving non-zero client settings. It intentionally does not add a reasoning parameter to requests that never declared one, so non-reasoning models do not receive unsupported fields.
-- **Management Page** — appears in CPAMC at `#/plugin-pages/paratera-raw-responses/0`.
+- **Request Interceptor** — inspects requests after they enter CPA and repairs a declared invalid `reasoning.effort` / `reasoning_effort` value.
+- **Management Page** — appears in CPAMC at `#/plugin-pages/cpa-reasoning-guard/0`.
 
-Set `raw_responses_routing: true` only when you explicitly want the plugin-owned executor. In the recommended mode it is `false`: CPA's `openai-compatibility` Paratera provider owns aliases, credentials, and the AI Provider enable/disable toggle.
+It deliberately does **not** expose a model provider, model router, executor, static models, credential store, or direct HTTP client. CPA's existing enabled AI Providers retain full control of routing and credentials.
 
 ## Build
 
 ```bash
-CGO_ENABLED=1 go build -buildmode=c-shared -o paratera-raw-responses-v0.1.0.so main.go
-rm -f paratera-raw-responses-v0.1.0.h
+CGO_ENABLED=1 go build -buildmode=c-shared -o cpa-reasoning-guard-v0.2.0.so main.go
+rm -f cpa-reasoning-guard-v0.2.0.h
 ```
 
-Use Linux `amd64` for the VPS deployment. `make release` builds the release artifact in Docker.
+Use Linux `amd64` for a standard x86_64 CPA VPS. `make release` builds the release artifact in Docker.
 
 ## CPA Configuration
 
@@ -22,11 +22,11 @@ Use Linux `amd64` for the VPS deployment. `make release` builds the release arti
 plugins:
   enabled: true
   configs:
-    paratera-raw-responses:
+    cpa-reasoning-guard:
       enabled: true
-      raw_responses_routing: false
       reasoning_guard: true
+      repair_missing_effort: true
       default_reasoning_effort: high
 ```
 
-Configure the Paratera API key in CPA's root-owned `openai-compatibility` provider entry, not in Git.
+Provider credentials, base URLs, model aliases, and enable/disable state belong exclusively in CPA's normal AI Provider configuration.

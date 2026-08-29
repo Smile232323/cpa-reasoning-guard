@@ -1,2 +1,0 @@
-[Service]
-EnvironmentFile=/etc/cliproxy/paratera-raw-responses.env

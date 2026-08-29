@@ -1,5 +1,5 @@
-PLUGIN_ID := paratera-raw-responses
-VERSION := 0.1.0
+PLUGIN_ID := cpa-reasoning-guard
+VERSION := 0.2.0
 DIST := dist
 ARTIFACT := $(DIST)/$(PLUGIN_ID)-v$(VERSION).so
 

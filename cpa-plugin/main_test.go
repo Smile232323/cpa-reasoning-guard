@@ -5,20 +5,20 @@ import (
 	"testing"
 )
 
-func TestGuardReasoningResponsesRepairsDeclaredReasoning(t *testing.T) {
-	body := guardReasoningBody([]byte(`{"model":"any-provider-model","reasoning":{}}`), "responses", "high")
+func TestGuardReasoningRepairsDeclaredMissingEffort(t *testing.T) {
+	body := guardReasoningBody([]byte(`{"model":"any-provider-model","reasoning":{}}`), "high", true)
 	var payload map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
 		t.Fatal(err)
 	}
-	reasoning, ok := payload["reasoning"].(map[string]any)
-	if !ok || reasoning["effort"] != "high" {
+	reasoning := payload["reasoning"].(map[string]any)
+	if reasoning["effort"] != "high" {
 		t.Fatalf("reasoning = %#v, want effort high", payload["reasoning"])
 	}
 }
 
-func TestGuardReasoningResponsesReplacesZero(t *testing.T) {
-	body := guardReasoningBody([]byte(`{"reasoning":{"effort":0}}`), "openai-responses", "xhigh")
+func TestGuardReasoningReplacesExplicitZero(t *testing.T) {
+	body := guardReasoningBody([]byte(`{"reasoning":{"effort":0}}`), "xhigh", true)
 	var payload map[string]map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
 		t.Fatal(err)
@@ -30,14 +30,13 @@ func TestGuardReasoningResponsesReplacesZero(t *testing.T) {
 
 func TestGuardReasoningKeepsExplicitEffort(t *testing.T) {
 	original := []byte(`{"reasoning":{"effort":"medium"}}`)
-	body := guardReasoningBody(original, "responses", "high")
-	if string(body) != string(original) {
+	if body := guardReasoningBody(original, "high", true); string(body) != string(original) {
 		t.Fatalf("body changed = %s", body)
 	}
 }
 
 func TestGuardReasoningChatRepairsZeroEffort(t *testing.T) {
-	body := guardReasoningBody([]byte(`{"model":"any-provider-model","messages":[],"reasoning_effort":0}`), "chat-completions", "high")
+	body := guardReasoningBody([]byte(`{"model":"any-provider-model","messages":[],"reasoning_effort":0}`), "high", true)
 	var payload map[string]any
 	if err := json.Unmarshal(body, &payload); err != nil {
 		t.Fatal(err)
@@ -47,26 +46,32 @@ func TestGuardReasoningChatRepairsZeroEffort(t *testing.T) {
 	}
 }
 
-func TestGuardReasoningSkipsOtherFormats(t *testing.T) {
-	original := []byte(`{"model":"any-provider-model","messages":[]}`)
-	body := guardReasoningBody(original, "images", "high")
-	if string(body) != string(original) {
+func TestGuardReasoningDoesNotAddUnsupportedFields(t *testing.T) {
+	original := []byte(`{"model":"provider-without-reasoning","messages":[]}`)
+	if body := guardReasoningBody(original, "high", true); string(body) != string(original) {
 		t.Fatalf("body changed = %s", body)
 	}
 }
 
-func TestPluginRegistrationExposesManagementPageAndGlobalGuard(t *testing.T) {
-	registration := pluginRegistration()
-	if !registration.Capabilities.ModelProvider || !registration.Capabilities.ModelRouter || !registration.Capabilities.Executor {
-		t.Fatalf("core capabilities = %#v", registration.Capabilities)
+func TestGuardCanLeaveMissingEffortUntouched(t *testing.T) {
+	original := []byte(`{"reasoning":{}}`)
+	if body := guardReasoningBody(original, "high", false); string(body) != string(original) {
+		t.Fatalf("body changed = %s", body)
 	}
+}
+
+func TestPluginRegistrationIsProviderAgnostic(t *testing.T) {
+	registration := pluginRegistration()
 	if !registration.Capabilities.RequestInterceptor || !registration.Capabilities.ManagementAPI {
-		t.Fatalf("global guard and management page are not registered: %#v", registration.Capabilities)
+		t.Fatalf("capabilities = %#v", registration.Capabilities)
+	}
+	if registration.Metadata.Name != "CPA Provider Reasoning Guard" {
+		t.Fatalf("metadata = %#v", registration.Metadata)
 	}
 }
 
 func TestManagementPageReturnsHTML(t *testing.T) {
-	response, err := managementPage([]byte(`{"Method":"GET","Path":"/v0/resource/plugins/paratera-raw-responses/overview"}`))
+	response, err := managementPage([]byte(`{"Method":"GET"}`))
 	if err != nil {
 		t.Fatal(err)
 	}

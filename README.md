@@ -1,101 +1,75 @@
-# CPA Raw Responses Plugin
+# CPA Provider Reasoning Guard
 
-**An independent native plugin for [CLIProxyAPI / CPA](https://github.com/router-for-me/CLIProxyAPI).**
+**A provider-agnostic native plugin for [CLIProxyAPI / CPA](https://github.com/router-for-me/CLIProxyAPI).**
 
-It keeps clients on CPA's normal `:8317` endpoint while providing two protections:
+CPA remains the only gateway. This plugin does not add an AI provider, contain an upstream URL, hold API keys, map model aliases, or make outbound model requests. Instead, it intercepts requests already routed by CPA to **any enabled AI Provider** and safely repairs malformed reasoning effort values.
 
-1. **CPA-managed Paratera GPT-5.6 routing.** Configure Paratera as a CPA `openai-compatibility` provider and map the lower-case aliases to Paratera's case-sensitive model IDs (`GPT-5.6-Terra`, etc.). Its `disabled` setting in CPAMC's **AI Providers** screen is the routing switch.
-2. **A global reasoning guard for every CPA provider and model.** The plugin runs as a CPA request interceptor and repairs only an explicit zero, null, or empty `reasoning.effort` / `reasoning_effort` value. Existing non-zero effort is preserved. It does **not** add reasoning fields to requests that did not declare them, preventing incompatible models from receiving unsupported parameters.
+## Why
 
-> This is not an official CLIProxyAPI distribution. It is a CPA native plugin plus an optional legacy sidecar fallback.
+Some intermediaries or clients serialize `reasoning.effort` / `reasoning_effort` as `0`, `null`, `false`, or an empty value. That can silently reduce reasoning quality even when the original provider supports an effort setting.
 
-## CPAMC Frontend
+The guard fixes that single compatibility issue while preserving CPA's normal routing:
 
-After installation, CPA automatically lists **Paratera Raw Responses** in:
+- Enable or disable a provider in CPAMC's **AI Providers** page to control whether it receives traffic.
+- Keep each provider's own key, base URL, aliases, proxy policy, usage accounting, and logs in CPA.
+- Use the same CPA `:8317` entrypoint and API token for every client.
+- Apply the repair to every request routed by an enabled CPA provider, not to one hard-coded upstream.
 
-```text
-http://your-cpa-host:8317/management.html#/plugin-pages/
-```
+## Safety rules
 
-The plugin page shows routing status, global reasoning-guard status, the default repair effort, upstream base URL, and the registered Paratera model aliases.
+- Repairs only a **declared** `reasoning.effort` or `reasoning_effort` whose value is zero, null, false, or empty.
+- Optionally fills a missing `effort` inside an existing `reasoning: {}` object.
+- Preserves valid explicit efforts such as `low`, `medium`, `high`, and `xhigh`.
+- Never adds a reasoning field to requests that did not already declare one, so providers/models without reasoning support remain compatible.
+- Contains no credentials and performs no direct upstream calls.
 
-## Features
+## Install
 
-- Native CPA `request_interceptor` and `management_api` capabilities, with an optional plugin-owned Raw Responses executor.
-- Normal CPA entrypoint at `http://your-cpa-host:8317/v1`.
-- CPA management UI registration and plugin resource page.
-- CPA request/usage handling remains in the normal gateway path.
-- Responses request body preservation for the selected Paratera model family.
-- The recommended provider uses `proxy-url: direct` and is managed by CPA itself.
-- Case-sensitive Paratera mapping for lower-case `gpt-5.6-luna`, `gpt-5.6-sol`, and `gpt-5.6-terra` aliases.
-- Non-streaming and SSE streaming support.
-- No API-key or request-body logging.
+1. Download `cpa-reasoning-guard-v0.2.0.so` from the release and copy it to your CPA plugin directory:
 
-## Build and Release
+   ```bash
+   sudo install -m 0755 cpa-reasoning-guard-v0.2.0.so \
+     /opt/cliproxy/plugins/linux/amd64/cpa-reasoning-guard-v0.2.0.so
+   ```
+
+2. Merge `plugin-config.example.yaml` into CPA's `config.yaml`:
+
+   ```yaml
+   plugins:
+     enabled: true
+     configs:
+       cpa-reasoning-guard:
+         enabled: true
+         reasoning_guard: true
+         repair_missing_effort: true
+         default_reasoning_effort: high
+   ```
+
+3. Restart CPA and open CPAMC:
+
+   ```bash
+   sudo systemctl restart cliproxy.service
+   ```
+
+   The plugin appears under `management.html#/plugin-pages/` as **CPA Reasoning Guard**.
+
+## Configuration
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `true` | Enables this plugin only; it never changes AI Provider enablement. |
+| `reasoning_guard` | `true` | Enables request interception. |
+| `repair_missing_effort` | `true` | Fills `reasoning: {}` with the configured effort. |
+| `default_reasoning_effort` | `high` | One of `minimal`, `low`, `medium`, `high`, `xhigh`. |
+
+## Build
 
 ```bash
 make test
 make release
 ```
 
-The release artifact is written to:
-
-```text
-dist/paratera-raw-responses-v0.1.0.so
-dist/checksums.txt
-```
-
-The target platform is `linux/amd64`, matching a standard x86_64 CPA VPS.
-
-## Install on CPA
-
-1. Copy `dist/paratera-raw-responses-v0.1.0.so` to:
-
-   ```text
-   /opt/cliproxy/plugins/linux/amd64/paratera-raw-responses-v0.1.0.so
-   ```
-
-2. Merge `plugin-config.example.yaml` and the `openai-compatibility` provider below into CPA's `config.yaml`. Keep `raw_responses_routing: false` so the AI Provider toggle remains authoritative.
-
-   ```yaml
-   openai-compatibility:
-     - name: paratera-raw-responses
-       disabled: false
-       priority: 100
-       base-url: https://llmapi.paratera.com/v1
-       api-key-entries:
-         - api-key: <PARATERA_API_KEY>
-           proxy-url: direct
-       models:
-         - { name: GPT-5.6-Luna, alias: gpt-5.6-luna, force-mapping: true }
-         - { name: GPT-5.6-Sol, alias: gpt-5.6-sol, force-mapping: true }
-         - { name: GPT-5.6-Terra, alias: gpt-5.6-terra, force-mapping: true }
-   ```
-
-3. Restart CPA:
-
-   ```bash
-   sudo systemctl daemon-reload
-   sudo systemctl restart cliproxy.service
-   ```
-
-4. Verify the AI Provider toggle in CPAMC, `GET /v1/models`, `POST /v1/responses`, and the CPA usage dashboard.
-
-## Configuration
-
-See `plugin-config.example.yaml` and `cpa-plugin/README.md`.
-
-`reasoning_guard: true` applies to all CPA providers and models. It repairs **declared zero/empty reasoning values** but intentionally leaves requests without a reasoning field unchanged for provider compatibility.
-
-## Optional Legacy Sidecar
-
-`paratera_raw_relay.py` and `paratera-raw-relay.service` are retained only as a fallback for environments that cannot load native CPA plugins. The native plugin is the recommended deployment because it appears in CPAMC and preserves CPA-side visibility.
-
-## Security
-
-- CPA's root-owned `config.yaml` contains the provider key; never commit it.
-- Do not commit `.env`, generated release artifacts, or real API keys.
-- Validate the CPA YAML and back up `/opt/cliproxy/config.yaml` before restarting.
+The release artifact is `dist/cpa-reasoning-guard-v0.2.0.so` for `linux/amd64` CPA hosts.
 
 ## License
 

@@ -1,9 +1,9 @@
 plugins:
   enabled: true
   configs:
-    paratera-raw-responses:
+    cpa-reasoning-guard:
       enabled: true
-      # Set false when models and credentials are managed by CPA's AI provider UI.
-      raw_responses_routing: false
       reasoning_guard: true
+      # Applies only when a request already contains a reasoning object.
+      repair_missing_effort: true
       default_reasoning_effort: high
